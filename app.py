@@ -1,68 +1,79 @@
 import streamlit as st
-from langchain_groq import ChatGroq
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 import os
 from dotenv import load_dotenv
 
-# Load .env
+from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+# --------------------------------------------------
+# Load environment variables
+# --------------------------------------------------
 load_dotenv()
 
-# Read Groq key from .env
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+HF_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
 
-if not GROQ_API_KEY:
-    st.error("GROQ_API_KEY not found in .env file")
+if not HF_TOKEN:
+    st.error("❌ HUGGINGFACE_API_TOKEN not found in environment variables")
     st.stop()
 
-# Prompt
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", "You are a helpful assistant."),
-        ("user", "{question}")
-    ]
-)
-
+# --------------------------------------------------
+# LLM Response Function
+# --------------------------------------------------
 def generate_response(question, model, temperature, max_tokens):
-    llm = ChatGroq(
-        groq_api_key=GROQ_API_KEY.strip(),  # 🔥 strip is critical
-        model=model,
+
+    # Hugging Face Inference Endpoint (chat-only model)
+    endpoint = HuggingFaceEndpoint(
+        repo_id=model,
+        task="conversational",          # 🔥 REQUIRED for Mistral-Instruct
         temperature=temperature,
-        max_tokens=max_tokens
+        max_new_tokens=max_tokens,
+        huggingfacehub_api_token=HF_TOKEN,
     )
 
+    # Wrap endpoint as a Chat model (IMPORTANT)
+    llm = ChatHuggingFace(llm=endpoint)
+
+    # Prompt
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a helpful AI assistant."),
+        ("human", "{question}")
+    ])
+
+    # Chain
     chain = prompt | llm | StrOutputParser()
+
     return chain.invoke({"question": question})
 
-# ---------------- UI ----------------
-st.title("Groq Q&A Chatbot")
+# --------------------------------------------------
+# Streamlit UI
+# --------------------------------------------------
+st.set_page_config(page_title="🤗 HuggingFace Q&A Chatbot", page_icon="🤗")
 
+st.title("🤗 HuggingFace Q&A Chatbot")
+st.write("Ask questions using **Chat Models** via Hugging Face Inference API")
 
-
-## Select the OpenAI model
-#engine=st.sidebar.selectbox("Select Open AI model",["gpt-4o","gpt-4-turbo","gpt-4"])
+question = st.text_input("Ask a question")
 
 model = st.sidebar.selectbox(
-    "Select model",
-    [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "gemma2-9b-it"
-    ]
+    "Select Model",
+    ["meta-llama/Meta-Llama-3-8B-Instruct","Qwen/Qwen2.5-7B-Instruct","HuggingFaceH4/zephyr-7b-beta"]
 )
 
+temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.7)
 
-## Adjust response parameter
-temperature=st.sidebar.slider("Temperature",min_value=0.0,max_value=1.0,value=0.7)
+max_tokens = st.sidebar.slider("Max Tokens", 100, 1000, 500)
 
-max_tokens = st.sidebar.slider( "Max Tokens", min_value=256, max_value=2048, value=1024, step=128)
-
-
-
-question = st.text_input("Ask your question")
-
-if question:
-    response = generate_response(question, model, temperature, max_tokens)
-    st.write(response)
-
-
+if st.button("Ask"):
+    if question.strip():
+        with st.spinner("Generating response..."):
+            response = generate_response(
+                question=question,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+        st.success("Response:")
+        st.write(response)
+    else:
+        st.warning("Please enter a question.")
